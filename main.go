@@ -22,6 +22,7 @@ func main() {
 	}
 
 	dg.AddHandler(messageCreate)
+	dg.AddHandler(interactionCreate)
 
 	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
@@ -29,6 +30,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Error opening connection:", err)
 	}
+
+	registerSlashCommands(dg)
 
 	log.Println("Bot is now running. Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
@@ -44,6 +47,35 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.Contains(strings.ToLower(m.Content), "<@"+s.State.User.ID+">") {
-		s.ChannelMessageSend(m.ChannelID, "Hello! I'm here and ready to help! 👋")
+		s.ChannelMessageSend(m.ChannelID, "Hi👋 你带砍倒了吗?")
+	}
+}
+
+func registerSlashCommands(s *discordgo.Session) {
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "help",
+			Description: "Show help information",
+		},
+	}
+
+	for _, cmd := range commands {
+		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
+		if err != nil {
+			log.Printf("Cannot create '%v' command: %v", cmd.Name, err)
+		}
+	}
+	log.Println("Slash commands registered successfully!")
+}
+
+func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.ApplicationCommandData().Name == "help" {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "qwerty123",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
 	}
 }
