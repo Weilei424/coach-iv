@@ -38,6 +38,12 @@ func main() {
 	}
 
 	registerSlashCommands(dg)
+	
+	// Also register guild-specific commands for faster testing
+	guilds := dg.State.Guilds
+	for _, guild := range guilds {
+		registerGuildSlashCommands(dg, guild.ID)
+	}
 
 	log.Println("Bot is now running. Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
@@ -79,6 +85,33 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 }
 
+func registerGuildSlashCommands(s *discordgo.Session, guildID string) {
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "help",
+			Description: "Show help information",
+		},
+		{
+			Name:        "pn",
+			Description: "Get the latest League of Legends patch notes",
+		},
+		{
+			Name:        "patchnotes",
+			Description: "Get the latest League of Legends patch notes",
+		},
+	}
+
+	log.Printf("Registering %d guild-specific slash commands for guild %s...", len(commands), guildID)
+	for _, cmd := range commands {
+		createdCmd, err := s.ApplicationCommandCreate(s.State.User.ID, guildID, cmd)
+		if err != nil {
+			log.Printf("Cannot create guild command '%v': %v", cmd.Name, err)
+		} else {
+			log.Printf("Successfully created guild command: %s (ID: %s)", createdCmd.Name, createdCmd.ID)
+		}
+	}
+}
+
 func registerSlashCommands(s *discordgo.Session) {
 	commands := []*discordgo.ApplicationCommand{
 		{
@@ -95,16 +128,21 @@ func registerSlashCommands(s *discordgo.Session) {
 		},
 	}
 
+	log.Printf("Registering %d slash commands...", len(commands))
 	for _, cmd := range commands {
-		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
+		createdCmd, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
 		if err != nil {
 			log.Printf("Cannot create '%v' command: %v", cmd.Name, err)
+		} else {
+			log.Printf("Successfully created command: %s (ID: %s)", createdCmd.Name, createdCmd.ID)
 		}
 	}
-	log.Println("Slash commands registered successfully!")
+	log.Println("Slash commands registration completed!")
 }
 
 func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("Interaction received: %s", i.ApplicationCommandData().Name)
+	
 	commandName := i.ApplicationCommandData().Name
 	
 	switch commandName {
@@ -117,12 +155,16 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 	case "pn", "patchnotes":
+		log.Printf("Processing patch notes command: %s", commandName)
 		patchNotesURL := getLatestPatchNotesURL()
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Content: fmt.Sprintf("📋 **Latest League of Legends Patch Notes:**\n%s", patchNotesURL),
 			},
 		})
+		if err != nil {
+			log.Printf("Error responding to interaction: %v", err)
+		}
 	}
 }
