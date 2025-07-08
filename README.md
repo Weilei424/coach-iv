@@ -9,7 +9,7 @@ A Discord bot that tracks League of Legends players and automatically posts game
 - **Rich Game Summaries**: Detailed match information including KDA, CS, damage, and more
 - **Player Statistics**: View aggregated stats for tracked players
 - **Discord Integration**: Full slash command support
-- **Database Storage**: Persistent SQLite database for player and match data
+- **Database Storage**: PostgreSQL database for scalable player and match data storage
 - **Containerized**: Easy deployment with Docker
 
 ## Setup Instructions
@@ -46,11 +46,21 @@ A Discord bot that tracks League of Legends players and automatically posts game
    DISCORD_TOKEN=your_bot_token_here
    RIOT_API_KEY=your_riot_api_key_here
    MONITOR_CHANNEL_ID=your_discord_channel_id_here
+   
+   # PostgreSQL Configuration (optional - uses defaults if not specified)
+   DB_USER=postgres
+   DB_PASSWORD=postgres
+   DB_NAME=lol_bot
    ```
 3. Run the deployment:
    ```bash
    docker-compose up -d
    ```
+   This will start:
+   - PostgreSQL database container
+   - Discord bot application
+   - Prometheus monitoring
+   - Grafana dashboard
 
 #### Option B: Using Docker Run
 
@@ -58,13 +68,28 @@ A Discord bot that tracks League of Legends players and automatically posts game
    ```bash
    docker build -t discord-bot .
    ```
-2. Run the container:
+2. Start PostgreSQL:
+   ```bash
+   docker run -d --name postgres \
+     -e POSTGRES_USER=postgres \
+     -e POSTGRES_PASSWORD=postgres \
+     -e POSTGRES_DB=lol_bot \
+     -p 5432:5432 \
+     -v postgres_data:/var/lib/postgresql/data \
+     postgres:15-alpine
+   ```
+3. Run the bot container:
    ```bash
    docker run -d --name discord-bot \
      -e DISCORD_TOKEN=your_bot_token_here \
      -e RIOT_API_KEY=your_riot_api_key_here \
      -e MONITOR_CHANNEL_ID=your_discord_channel_id_here \
-     -v $(pwd)/bot.db:/app/bot.db \
+     -e DB_HOST=localhost \
+     -e DB_PORT=5432 \
+     -e DB_USER=postgres \
+     -e DB_PASSWORD=postgres \
+     -e DB_NAME=lol_bot \
+     --network host \
      discord-bot
    ```
 
@@ -118,29 +143,75 @@ Each game summary includes:
 ```
 discord-bot/
 ├── main.go              # Main bot implementation and handlers
-├── models.go            # Database models and schema
+├── models.go            # Database models and PostgreSQL schema
 ├── riot_api.go          # Riot API client and data structures
-├── database.go          # Database operations and queries
+├── database.go          # PostgreSQL database operations and queries
 ├── game_monitor.go      # Background game monitoring service
-├── go.mod               # Go dependencies
+├── go.mod               # Go dependencies (discordgo, lib/pq, cron)
+├── go.sum               # Go module checksums
 ├── Dockerfile           # Container configuration
-├── docker-compose.yml   # Deployment configuration
-├── .env.example         # Environment template
-├── bot.db               # SQLite database (created on first run)
+├── docker-compose.yml   # Deployment with PostgreSQL, Prometheus, Grafana
+├── .env.example         # Environment template with DB config
+├── prometheus.yml       # Prometheus monitoring configuration
 └── README.md           # This file
 ```
 
 ## Environment Variables
 
-- `DISCORD_TOKEN` - Required: Your Discord bot token
-- `RIOT_API_KEY` - Required: Your Riot Games API key
-- `MONITOR_CHANNEL_ID` - Optional: Discord channel ID for game summaries
+### Required
+- `DISCORD_TOKEN` - Your Discord bot token
+- `RIOT_API_KEY` - Your Riot Games API key
+
+### Optional
+- `MONITOR_CHANNEL_ID` - Discord channel ID for game summaries
+- `DB_HOST` - PostgreSQL host (default: localhost)
+- `DB_PORT` - PostgreSQL port (default: 5432)
+- `DB_USER` - PostgreSQL username (default: postgres)
+- `DB_PASSWORD` - PostgreSQL password (default: postgres)
+- `DB_NAME` - PostgreSQL database name (default: lol_bot)
 
 ## Database Schema
 
-The bot uses SQLite with two main tables:
-- `tracked_players` - Stores player information and tracking status
-- `match_data` - Stores detailed match statistics for analysis
+The bot uses PostgreSQL with two main tables:
+
+### tracked_players
+```sql
+CREATE TABLE tracked_players (
+    id SERIAL PRIMARY KEY,
+    puuid VARCHAR(78) UNIQUE NOT NULL,
+    game_name VARCHAR(255) NOT NULL,
+    tag_line VARCHAR(16) NOT NULL,
+    summoner_id VARCHAR(63) NOT NULL,
+    last_match_id VARCHAR(32),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### match_data
+```sql
+CREATE TABLE match_data (
+    id SERIAL PRIMARY KEY,
+    match_id VARCHAR(32) NOT NULL,
+    puuid VARCHAR(78) NOT NULL,
+    champion VARCHAR(50) NOT NULL,
+    game_mode VARCHAR(50) NOT NULL,
+    game_duration INTEGER NOT NULL,
+    win BOOLEAN NOT NULL,
+    kills INTEGER NOT NULL,
+    deaths INTEGER NOT NULL,
+    assists INTEGER NOT NULL,
+    creep_score INTEGER NOT NULL,
+    damage_dealt INTEGER NOT NULL,
+    damage_taken INTEGER NOT NULL,
+    vision_score INTEGER NOT NULL,
+    gold_earned INTEGER NOT NULL,
+    items TEXT NOT NULL,
+    game_creation TIMESTAMP NOT NULL,
+    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(match_id, puuid)
+);
+```
 
 ## API Rate Limits
 
@@ -154,4 +225,5 @@ The bot respects Riot API rate limits:
 - **"Player not found"**: Ensure the summoner name format is correct (PlayerName#TAG)
 - **API key expired**: Development keys expire every 24 hours - get a new one from Riot Developer Portal
 - **No game summaries**: Check that `MONITOR_CHANNEL_ID` is set and the bot has permissions to post in that channel
-- **Database locked**: Ensure proper file permissions for the SQLite database file
+- **Database connection failed**: Check PostgreSQL container is running and environment variables are correct
+- **Database migration errors**: Ensure PostgreSQL user has CREATE TABLE permissions
