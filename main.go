@@ -62,13 +62,16 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Riot API client
-	riotAPI = NewRiotAPI(riotAPIKey)
-
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatal("Error creating Discord session:", err)
 	}
+
+	// Get monitor channel ID for the riot API
+	monitorChannelID := os.Getenv("MONITOR_CHANNEL_ID")
+	
+	// Initialize Riot API client
+	riotAPI = NewRiotAPI(riotAPIKey, dg, monitorChannelID)
 
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(interactionCreate)
@@ -89,7 +92,6 @@ func main() {
 	}
 
 	// Initialize and start game monitor
-	monitorChannelID := os.Getenv("MONITOR_CHANNEL_ID")
 	gameMonitor = NewGameMonitor(db, riotAPI, dg, monitorChannelID)
 	gameMonitor.Start()
 	defer gameMonitor.Stop()
@@ -355,7 +357,7 @@ func handleTrackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		},
 	})
 
-	account, err := riotAPI.GetAccountByRiotID(gameName, tagLine)
+	account, err := riotAPI.GetAccountByRiotIDWithUser(gameName, tagLine, i.Member.User.ID)
 	if err != nil {
 		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 			Content: fmt.Sprintf("❌ Error finding player %s#%s: %v", gameName, tagLine, err),
@@ -364,7 +366,7 @@ func handleTrackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	summoner, err := riotAPI.GetSummonerByPUUID(account.PUUID)
+	summoner, err := riotAPI.GetSummonerByPUUIDWithUser(account.PUUID, i.Member.User.ID)
 	if err != nil {
 		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 			Content: fmt.Sprintf("❌ Error getting summoner data: %v", err),

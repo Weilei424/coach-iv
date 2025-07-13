@@ -6,11 +6,14 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"github.com/bwmarrin/discordgo"
 )
 
 type RiotAPI struct {
 	APIKey string
 	Client *http.Client
+	DiscordSession *discordgo.Session
+	ChannelID string
 }
 
 type Account struct {
@@ -58,12 +61,14 @@ type Match struct {
 	} `json:"info"`
 }
 
-func NewRiotAPI(apiKey string) *RiotAPI {
+func NewRiotAPI(apiKey string, discordSession *discordgo.Session, channelID string) *RiotAPI {
 	return &RiotAPI{
 		APIKey: apiKey,
 		Client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		DiscordSession: discordSession,
+		ChannelID: channelID,
 	}
 }
 
@@ -89,6 +94,36 @@ func (r *RiotAPI) makeRequest(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+func (r *RiotAPI) makeRequestWithUser(url string, userID string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("X-Riot-Token", r.APIKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		if r.DiscordSession != nil && r.ChannelID != "" {
+			message := fmt.Sprintf("我真是服了，<@weilei_>还不rotate key吗, <@%s>啥都用不了", userID)
+			r.DiscordSession.ChannelMessageSend(r.ChannelID, message)
+		}
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
 func (r *RiotAPI) GetAccountByRiotID(gameName, tagLine string) (*Account, error) {
 	url := fmt.Sprintf("https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/%s/%s", gameName, tagLine)
 
@@ -105,10 +140,42 @@ func (r *RiotAPI) GetAccountByRiotID(gameName, tagLine string) (*Account, error)
 	return &account, nil
 }
 
+func (r *RiotAPI) GetAccountByRiotIDWithUser(gameName, tagLine, userID string) (*Account, error) {
+	url := fmt.Sprintf("https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/%s/%s", gameName, tagLine)
+
+	body, err := r.makeRequestWithUser(url, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var account Account
+	if err := json.Unmarshal(body, &account); err != nil {
+		return nil, err
+	}
+
+	return &account, nil
+}
+
 func (r *RiotAPI) GetSummonerByPUUID(puuid string) (*Summoner, error) {
 	url := fmt.Sprintf("https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/%s", puuid)
 
 	body, err := r.makeRequest(url)
+	if err != nil {
+		return nil, err
+	}
+
+	var summoner Summoner
+	if err := json.Unmarshal(body, &summoner); err != nil {
+		return nil, err
+	}
+
+	return &summoner, nil
+}
+
+func (r *RiotAPI) GetSummonerByPUUIDWithUser(puuid, userID string) (*Summoner, error) {
+	url := fmt.Sprintf("https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/%s", puuid)
+
+	body, err := r.makeRequestWithUser(url, userID)
 	if err != nil {
 		return nil, err
 	}
